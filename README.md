@@ -55,6 +55,7 @@ dotnet add src/WebApi reference src/Infrastructure
 dotnet add src/WebApi package Microsoft.AspNetCore.Components.WebAssembly.Server
 dotnet add src/WebApi package Microsoft.AspNetCore.OpenApi
 dotnet add src/WebApi package Swashbuckle.AspNetCore
+dotnet add src/WebApi package Yarp.ReverseProxy
 dotnet add src/WebApi package OpenTelemetry.Extensions.Hosting
 dotnet add src/WebApi package OpenTelemetry.Exporter.OpenTelemetryProtocol
 dotnet add src/WebApi package OpenTelemetry.Instrumentation.AspNetCore
