@@ -10,12 +10,14 @@ internal sealed class SendFormHandler : IRequestHandler<SendForm>
     private readonly ILogger<SendFormHandler> logger;
     private readonly IMediator mediator;
     private readonly IFormRepository repository;
+    private readonly IUnitOfWork unitOfWork;
 
-    public SendFormHandler(ILogger<SendFormHandler> logger, IMediator mediator, IFormRepository repository)
+    public SendFormHandler(ILogger<SendFormHandler> logger, IMediator mediator, IFormRepository repository, IUnitOfWork unitOfWork)
     {
         this.logger = logger;
         this.mediator = mediator;
         this.repository = repository;
+        this.unitOfWork = unitOfWork;
     }
 
     public async Task Handle(SendForm request, CancellationToken cancellationToken)
@@ -23,7 +25,10 @@ internal sealed class SendFormHandler : IRequestHandler<SendForm>
         var entity = new FormEntity(request.Id, request.Payload);
 
         this.logger.LogInformation("Saving form with id {Id}", request.Id.Value);
-        await repository.UpsertAsync(entity, cancellationToken);
+        await this.unitOfWork.ExecuteInTransactionAsync(async ct =>
+        {
+            await this.repository.UpsertAsync(entity, ct);
+        }, cancellationToken);
         this.logger.LogInformation("Form with id {Id} saved successfully", request.Id.Value);
 
         var @event = new FormSent

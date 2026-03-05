@@ -7,6 +7,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Using Include="Iacula.Domain.Enums" />
+    <Using Include="Iacula.Domain.Types" />
+    <Using Include="MediatR" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="10.0.3" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.3" />
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.15.0" />

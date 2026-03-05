@@ -1,5 +1,7 @@
 namespace Iacula.WebApi;
 
+using Iacula.Application;
+using Iacula.Infrastructure;
 using OpenTelemetry.Logs;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -23,6 +25,10 @@ public class Program
             });
 
         var builder = WebApplication.CreateBuilder(args);
+
+        builder.Services.AddApplication();
+        builder.Services.AddInfrastructure(builder.Configuration);
+
 
         builder.Logging.AddOpenTelemetry(options => options.SetResourceBuilder(resourceBuilder).AddOtlpExporter());
 
@@ -52,6 +58,8 @@ public class Program
         builder.Services.AddAuthorization();
 
         var app = builder.Build();
+
+        await app.InitializeInfrastructureAsync();
 
         app.UseHealthChecks("/healthz");
 

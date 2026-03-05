@@ -28,7 +28,7 @@ public class SendFormTests : TestBase
         sut.ShouldNotBeNull();
         sut.Id.ShouldBe(formId);
         sut.Payload.ShouldBe(command.Payload);
-        sut.Status.ShouldBe(MessageStatus.Created);
+        sut.Status.ShouldBe(MessageStatus.InProgress);
     }
 
     [TestMethod]

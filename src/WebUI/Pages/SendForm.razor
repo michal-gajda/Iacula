@@ -1,0 +1,85 @@
+@page "/send-form"
+
+@inject HttpClient Http
+
+<PageTitle>Send Form</PageTitle>
+
+<h1>Send Form</h1>
+
+<div class="mb-3">
+    <label class="form-label" for="payload">Message</label>
+    <textarea id="payload" class="form-control" rows="4" @bind="payload"></textarea>
+</div>
+
+<button class="btn btn-primary" @onclick="SendAsync" disabled="@isSending">@(isSending ? "Sending..." : "Send")</button>
+
+@if (errorMessage is not null)
+{
+    <div class="alert alert-danger mt-3" role="alert">@errorMessage</div>
+}
+
+@if (successMessage is not null)
+{
+    <div class="alert alert-success mt-3" role="alert">@successMessage</div>
+}
+
+@code {
+    private string payload = string.Empty;
+    private bool isSending;
+    private string? errorMessage;
+    private string? successMessage;
+
+    private async Task SendAsync()
+    {
+        this.errorMessage = null;
+        this.successMessage = null;
+
+        if (string.IsNullOrWhiteSpace(this.payload))
+        {
+            this.errorMessage = "Message cannot be empty.";
+            return;
+        }
+
+        this.isSending = true;
+
+        try
+        {
+            var response = await this.Http.PostAsJsonAsync("api/forms/send", new SendFormRequest
+            {
+                Payload = this.payload,
+            });
+
+            if (response.IsSuccessStatusCode is false)
+            {
+                this.errorMessage = $"API returned {(int)response.StatusCode} {response.ReasonPhrase}";
+                return;
+            }
+
+            var result = await response.Content.ReadFromJsonAsync<SendFormResponse>();
+
+            this.successMessage = result is null
+                ? "Message sent."
+                : $"Message sent. Id: {result.Id}";
+
+            this.payload = string.Empty;
+        }
+        catch (Exception exception)
+        {
+            this.errorMessage = exception.Message;
+        }
+        finally
+        {
+            this.isSending = false;
+        }
+    }
+
+    private sealed class SendFormRequest
+    {
+        public required string Payload { get; init; }
+    }
+
+    private sealed class SendFormResponse
+    {
+        public required Guid Id { get; init; }
+    }
+}

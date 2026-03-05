@@ -5,6 +5,7 @@ using Iacula.Infrastructure.EntityFramework;
 using Iacula.Infrastructure.MassTransit;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 public static class ServiceExtensions
 {
@@ -19,5 +20,12 @@ public static class ServiceExtensions
         services.AddMassTransit(configuration);
 
         services.AddSingleton(TimeProvider.System);
+    }
+
+    public static async Task InitializeInfrastructureAsync(this IHost host, CancellationToken cancellationToken = default)
+    {
+        using var scope = host.Services.CreateScope();
+        var initializer = scope.ServiceProvider.GetRequiredService<DatabaseInitializer>();
+        await initializer.InitializeAsync(cancellationToken);
     }
 }
