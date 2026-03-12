@@ -7,9 +7,9 @@ import { FetchInstrumentation } from "https://cdn.jsdelivr.net/npm/@opentelemetr
 
 const provider = new WebTracerProvider({
   resource: new Resource({
-    "service.name": "webui",
-    "service.namespace": "iacula",
-    "service.version": "poc",
+    "service.name": "iacula-webui",
+    "service.namespace": "poc",
+    "service.version": "1.0.0",
     "client.type": "webassembly"
   })
 });

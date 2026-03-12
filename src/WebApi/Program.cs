@@ -2,16 +2,17 @@ namespace Iacula.WebApi;
 
 using Iacula.Application;
 using Iacula.Infrastructure;
+using MassTransit.Logging;
 using OpenTelemetry.Logs;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 
-public class Program
+public static class Program
 {
-    private const string SERVICE_NAME = "webapi";
-    private const string SERVICE_NAMESPACE = "iacula";
-    private const string SERVICE_VERSION = "poc";
+    private const string SERVICE_NAME = "iacula";
+    private const string SERVICE_NAMESPACE = "poc";
+    private const string SERVICE_VERSION = "1.0.0";
 
     public static async Task Main(string[] args)
     {
@@ -29,7 +30,6 @@ public class Program
         builder.Services.AddApplication();
         builder.Services.AddInfrastructure(builder.Configuration);
 
-
         builder.Logging.AddOpenTelemetry(options => options.SetResourceBuilder(resourceBuilder).AddOtlpExporter());
 
         builder.Services.AddOpenTelemetry()
@@ -38,6 +38,7 @@ public class Program
                 .SetSampler(new AlwaysOnSampler())
                 .AddAspNetCoreInstrumentation(opt => opt.RecordException = true)
                 .AddHttpClientInstrumentation(opt => opt.RecordException = true)
+                .AddSource(DiagnosticHeaders.DefaultListenerName)
                 .AddOtlpExporter())
             .WithMetrics(metrics => metrics
                 .SetResourceBuilder(resourceBuilder)
