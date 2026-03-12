@@ -10,3 +10,6 @@ run:
 
 test:
 	dotnet test
+
+whatch:
+	dotnet watch --project src/WebApi run
