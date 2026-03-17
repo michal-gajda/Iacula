@@ -3,7 +3,7 @@ namespace Iacula.WebUI;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 
-public class Program
+public static class Program
 {
     public static async Task Main(string[] args)
     {

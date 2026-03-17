@@ -28,27 +28,28 @@ internal sealed class FormRepository : IFormRepository
         return this.mapper.Map<FormEntity?>(dbEntity);
     }
 
-    public async Task UpsertAsync(FormEntity domainEntity, CancellationToken cancellationToken = default)
+    public async Task UpsertAsync(FormEntity entity, CancellationToken cancellationToken = default)
     {
-        this.logger.LogInformation("Upserting form with id {FormId}", domainEntity.Id.Value);
+        this.logger.LogInformation("Upserting form with id {FormId}", entity.Id.Value);
 
         var existingDbEntity = await this.dbContext.Forms
-            .SingleOrDefaultAsync(item => item.Id == domainEntity.Id.Value, cancellationToken);
+            .SingleOrDefaultAsync(item => item.Id == entity.Id.Value, cancellationToken);
 
         if (existingDbEntity is null)
         {
-            var newDbEntity = this.mapper.Map<FormDbEntity>(domainEntity);
+            var newDbEntity = this.mapper.Map<FormDbEntity>(entity);
             newDbEntity.Version = 1;
             this.dbContext.Forms.Add(newDbEntity);
+
             return;
         }
 
         this.dbContext.Entry(existingDbEntity)
             .Property(item => item.Version)
-            .OriginalValue = domainEntity.Version;
+            .OriginalValue = entity.Version;
 
-        this.mapper.Map(domainEntity, existingDbEntity);
+        this.mapper.Map(entity, existingDbEntity);
 
-        existingDbEntity.Version = domainEntity.Version + 1;
+        existingDbEntity.Version = entity.Version + 1;
     }
 }

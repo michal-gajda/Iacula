@@ -19,13 +19,13 @@ internal static class ServiceExtensions
 
         var sqliteBuilder = new SqliteConnectionStringBuilder(connectionString);
 
-        if (sqliteBuilder.DataSource.Equals(":memory:", StringComparison.OrdinalIgnoreCase)
-            || sqliteBuilder.Mode == SqliteOpenMode.Memory)
+        if (sqliteBuilder.DataSource.Equals(":memory:", StringComparison.OrdinalIgnoreCase) || sqliteBuilder.Mode is SqliteOpenMode.Memory)
         {
             services.AddSingleton(sp =>
             {
                 var connection = new SqliteConnection(connectionString);
                 connection.Open();
+
                 return connection;
             });
 

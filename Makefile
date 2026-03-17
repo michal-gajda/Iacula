@@ -6,7 +6,7 @@ publish:
 	dotnet publish src/WebApi --configuration Release --output ./publish2
 
 run:
-	dotnet run --project src/WebApi
+	dotnet --project src/WebApi run
 
 test:
 	dotnet test

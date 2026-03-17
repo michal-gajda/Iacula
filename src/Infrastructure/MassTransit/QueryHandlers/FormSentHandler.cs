@@ -1,12 +1,12 @@
 namespace Iacula.Infrastructure.MassTransit.QueryHandlers;
 
-using System.Text.Json;
 using Iacula.Application.Forms.Events;
 using Iacula.Domain.Interfaces;
 using Iacula.Infrastructure.EntityFramework.Interfaces;
 using Iacula.Infrastructure.EntityFramework.Models;
 using Iacula.Shared;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 internal sealed class FormSentHandler : INotificationHandler<FormSent>
 {

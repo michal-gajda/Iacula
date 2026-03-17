@@ -3,8 +3,7 @@ namespace Iacula.WebApi.Controllers;
 using Iacula.Application.Forms.Commands;
 using Microsoft.AspNetCore.Mvc;
 
-[ApiController]
-[Route("api/forms")]
+[ApiController, Route("api/forms")]
 public sealed class FormsController : ControllerBase
 {
     private readonly IMediator mediator;
@@ -15,7 +14,7 @@ public sealed class FormsController : ControllerBase
     }
 
     [HttpPost("send")]
-    public async Task<ActionResult<SendFormResponse>> SendAsync([FromBody] SendFormRequest request, CancellationToken cancellationToken)
+    public async Task<ActionResult<SendFormResponse>> SendAsync([FromBody] SendFormRequest request, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.Payload))
         {

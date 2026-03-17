@@ -13,11 +13,13 @@ internal sealed class OutboxPublisherService : BackgroundService
 
     private readonly IServiceScopeFactory serviceScopeFactory;
     private readonly ILogger<OutboxPublisherService> logger;
+    private readonly TimeProvider timeProvider;
 
-    public OutboxPublisherService(IServiceScopeFactory serviceScopeFactory, ILogger<OutboxPublisherService> logger)
+    public OutboxPublisherService(IServiceScopeFactory serviceScopeFactory, ILogger<OutboxPublisherService> logger, TimeProvider timeProvider)
     {
         this.serviceScopeFactory = serviceScopeFactory;
         this.logger = logger;
+        this.timeProvider = timeProvider;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -44,35 +46,51 @@ internal sealed class OutboxPublisherService : BackgroundService
         var dbContext = scope.ServiceProvider.GetRequiredService<IaculaDbContext>();
         var sendEndpointProvider = scope.ServiceProvider.GetRequiredService<ISendEndpointProvider>();
 
-        var nowUtc = DateTime.UtcNow;
+        var nowUtc = this.timeProvider.GetUtcNow().UtcDateTime;
         var lockUntilUtc = nowUtc.AddSeconds(30);
 
-        var candidates = await dbContext.Outbox
+        var candidateIds = await dbContext.Outbox
             .AsNoTracking()
             .Where(item => item.SentAtUtc == null)
             .Where(item => item.FailedAtUtc == null)
             .Where(item => item.ProcessAfterUtc == null || item.ProcessAfterUtc <= nowUtc)
             .Where(item => item.LockedUntilUtc == null || item.LockedUntilUtc <= nowUtc)
             .OrderBy(item => item.CreatedAtUtc)
+            .Select(item => item.Id)
             .Take(BATCH_SIZE)
             .ToListAsync(cancellationToken);
 
-        if (candidates.Count == 0)
+        if (candidateIds.Count == 0)
         {
             return;
         }
 
-        foreach (var candidate in candidates)
+        var lockedIds = new List<Guid>(candidateIds.Count);
+
+        foreach (var candidateId in candidateIds)
         {
-            var tracked = await dbContext.Outbox.SingleAsync(item => item.Id == candidate.Id, cancellationToken);
-            tracked.LockedUntilUtc = lockUntilUtc;
+            // Atomic claim prevents two app instances from locking and publishing the same outbox row.
+            var rowsAffected = await dbContext.Database.ExecuteSqlInterpolatedAsync(
+                $"""
+                UPDATE "Outbox"
+                SET "LockedUntilUtc" = {lockUntilUtc}
+                WHERE "Id" = {candidateId}
+                  AND "SentAtUtc" IS NULL
+                  AND "FailedAtUtc" IS NULL
+                  AND ("ProcessAfterUtc" IS NULL OR "ProcessAfterUtc" <= {nowUtc})
+                  AND ("LockedUntilUtc" IS NULL OR "LockedUntilUtc" <= {nowUtc});
+                """,
+                cancellationToken);
+
+            if (rowsAffected == 1)
+            {
+                lockedIds.Add(candidateId);
+            }
         }
 
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        foreach (var candidate in candidates)
+        foreach (var lockedId in lockedIds)
         {
-            await this.PublishSingleAsync(dbContext, sendEndpointProvider, candidate.Id, cancellationToken);
+            await this.PublishSingleAsync(dbContext, sendEndpointProvider, lockedId, cancellationToken);
         }
     }
 
@@ -88,7 +106,7 @@ internal sealed class OutboxPublisherService : BackgroundService
             var endpoint = await sendEndpointProvider.GetSendEndpoint(new Uri("queue:send-form"));
             await endpoint.Send(messageObject, messageType, cancellationToken);
 
-            outboxItem.SentAtUtc = DateTime.UtcNow;
+            outboxItem.SentAtUtc = this.timeProvider.GetUtcNow().UtcDateTime;
             outboxItem.LockedUntilUtc = null;
 
             await dbContext.SaveChangesAsync(cancellationToken);
@@ -99,11 +117,11 @@ internal sealed class OutboxPublisherService : BackgroundService
             outboxItem.LastError = exception.ToString();
             outboxItem.LockedUntilUtc = null;
 
-            outboxItem.ProcessAfterUtc = DateTime.UtcNow.AddSeconds(Math.Min(60, 2 * outboxItem.AttemptCount));
+            outboxItem.ProcessAfterUtc = this.timeProvider.GetUtcNow().UtcDateTime.AddSeconds(Math.Min(60, 2 * outboxItem.AttemptCount));
 
             if (outboxItem.AttemptCount >= 10)
             {
-                outboxItem.FailedAtUtc = DateTime.UtcNow;
+                outboxItem.FailedAtUtc = this.timeProvider.GetUtcNow().UtcDateTime;
             }
 
             await dbContext.SaveChangesAsync(cancellationToken);

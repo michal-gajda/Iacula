@@ -1,11 +1,11 @@
 namespace Iacula.Infrastructure;
 
-using System.Reflection;
 using Iacula.Infrastructure.EntityFramework;
 using Iacula.Infrastructure.MassTransit;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using System.Reflection;
 
 public static class ServiceExtensions
 {

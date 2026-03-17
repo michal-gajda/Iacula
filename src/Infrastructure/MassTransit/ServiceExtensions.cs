@@ -8,7 +8,8 @@ internal static class ServiceExtensions
 {
     public static void AddMassTransit(this IServiceCollection services, IConfiguration configuration)
     {
-        var hostOptions = configuration.GetSection("MassTransit").Get<MassTransitHostOptions>();
+        var massTransitSection = configuration.GetSection("MassTransit");
+        var hostOptions = massTransitSection.Get<MassTransitHostOptions>();
         hostOptions ??= new MassTransitHostOptions
         {
             WaitUntilStarted = true,
@@ -16,9 +17,15 @@ internal static class ServiceExtensions
             StopTimeout = TimeSpan.FromSeconds(30),
         };
 
-        services.Configure<MassTransitHostOptions>(cfg => cfg = hostOptions);
+        services.Configure<MassTransitHostOptions>(cfg =>
+        {
+            cfg.WaitUntilStarted = hostOptions.WaitUntilStarted;
+            cfg.StartTimeout = hostOptions.StartTimeout;
+            cfg.StopTimeout = hostOptions.StopTimeout;
+            cfg.ConsumerStopTimeout = hostOptions.ConsumerStopTimeout;
+        });
 
-        var transportOptions = configuration.GetSection("RabbitMq").Get<RabbitMqTransportOptions>();
+        var transportOptions = configuration.GetSection("RabbitMQ").Get<RabbitMqTransportOptions>();
         transportOptions ??= new RabbitMqTransportOptions
         {
             Host = "localhost",
@@ -31,6 +38,8 @@ internal static class ServiceExtensions
 
         services.AddMassTransit(bus =>
         {
+            bus.SetKebabCaseEndpointNameFormatter();
+
             bus.UsingRabbitMq((context, cfg) =>
             {
                 cfg.Host(transportOptions.Host, transportOptions.Port, transportOptions.VHost, host =>
@@ -44,6 +53,7 @@ internal static class ServiceExtensions
                     }
                 });
 
+                cfg.PrefetchCount = 16;
                 cfg.ConfigureEndpoints(context);
             });
         });

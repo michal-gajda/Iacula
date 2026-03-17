@@ -11,7 +11,7 @@ internal sealed class EntityFrameworkUnitOfWork : IUnitOfWork
         this.dbContext = dbContext;
     }
 
-    public async Task ExecuteInTransactionAsync(Func<CancellationToken, Task> action, CancellationToken cancellationToken)
+    public async Task ExecuteInTransactionAsync(Func<CancellationToken, Task> action, CancellationToken cancellationToken = default)
     {
         await using var transaction = await this.dbContext.Database.BeginTransactionAsync(cancellationToken);
 

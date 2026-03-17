@@ -37,6 +37,7 @@
         if (string.IsNullOrWhiteSpace(this.payload))
         {
             this.errorMessage = "Message cannot be empty.";
+
             return;
         }
 
@@ -52,6 +53,7 @@
             if (response.IsSuccessStatusCode is false)
             {
                 this.errorMessage = $"API returned {(int)response.StatusCode} {response.ReasonPhrase}";
+
                 return;
             }
 
