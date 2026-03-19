@@ -15,6 +15,10 @@ internal sealed class DatabaseInitializer
     {
         await this.dbContext.Database.EnsureCreatedAsync(cancellationToken);
 
+        await this.dbContext.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;", cancellationToken);
+
+        await this.dbContext.Database.ExecuteSqlRawAsync("PRAGMA busy_timeout=30000;", cancellationToken);
+
         await this.dbContext.Database.ExecuteSqlRawAsync(
             """
             CREATE TABLE IF NOT EXISTS "Outbox" (

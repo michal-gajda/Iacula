@@ -1,15 +1,15 @@
 build:
 	dotnet build src/WebApi
 
-publish:
+publish: build
 	dotnet publish src/WebApi --configuration Release --output ./publish1
 	dotnet publish src/WebApi --configuration Release --output ./publish2
 
 run:
-	dotnet --project src/WebApi run
+	dotnet run --project src/WebApi
 
 test:
 	dotnet test
 
 whatch:
-	dotnet watch --project src/WebApi run
+	dotnet watch run --project src/WebApi
