@@ -14,26 +14,25 @@ internal sealed class DatabaseInitializer
     public async Task InitializeAsync(CancellationToken cancellationToken)
     {
         await this.dbContext.Database.EnsureCreatedAsync(cancellationToken);
+        await this.ApplySchemaChangesAsync(cancellationToken);
+    }
 
-        await this.dbContext.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;", cancellationToken);
+    private async Task ApplySchemaChangesAsync(CancellationToken cancellationToken)
+    {
+        var attemptCountExists = await this.dbContext.Database
+            .SqlQuery<int>($"""
+                SELECT COUNT(*) AS "Value"
+                FROM user_tab_columns
+                WHERE UPPER(table_name) = 'FORMS'
+                  AND UPPER(column_name) = 'ATTEMPTCOUNT'
+                """)
+            .SingleAsync(cancellationToken);
 
-        await this.dbContext.Database.ExecuteSqlRawAsync("PRAGMA busy_timeout=30000;", cancellationToken);
-
-        await this.dbContext.Database.ExecuteSqlRawAsync(
-            """
-            CREATE TABLE IF NOT EXISTS "Outbox" (
-                "Id" TEXT NOT NULL CONSTRAINT "PK_Outbox" PRIMARY KEY,
-                "CreatedAtUtc" TEXT NOT NULL,
-                "ProcessAfterUtc" TEXT NULL,
-                "LockedUntilUtc" TEXT NULL,
-                "AttemptCount" INTEGER NOT NULL,
-                "SentAtUtc" TEXT NULL,
-                "FailedAtUtc" TEXT NULL,
-                "MessageType" TEXT NOT NULL,
-                "PayloadJson" TEXT NOT NULL,
-                "LastError" TEXT NULL
-            );
-            """,
-            cancellationToken);
+        if (attemptCountExists == 0)
+        {
+            await this.dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "Forms" ADD "AttemptCount" NUMBER(10,0) DEFAULT 0 NOT NULL""",
+                cancellationToken);
+        }
     }
 }

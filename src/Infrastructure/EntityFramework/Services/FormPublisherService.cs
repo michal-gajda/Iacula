@@ -1,6 +1,5 @@
 namespace Iacula.Infrastructure.EntityFramework.Services;
 
-using System.Text.Json;
 using global::MassTransit;
 using Iacula.Infrastructure.EntityFramework;
 using Iacula.Infrastructure.EntityFramework.Models;
@@ -9,15 +8,16 @@ using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
-internal sealed class OutboxPublisherService : BackgroundService
+internal sealed class FormPublisherService : BackgroundService
 {
     private const int BATCH_SIZE = 50;
+    private const int MAX_ATTEMPTS = 10;
 
     private readonly IServiceScopeFactory serviceScopeFactory;
-    private readonly ILogger<OutboxPublisherService> logger;
+    private readonly ILogger<FormPublisherService> logger;
     private readonly TimeProvider timeProvider;
 
-    public OutboxPublisherService(IServiceScopeFactory serviceScopeFactory, ILogger<OutboxPublisherService> logger, TimeProvider timeProvider)
+    public FormPublisherService(IServiceScopeFactory serviceScopeFactory, ILogger<FormPublisherService> logger, TimeProvider timeProvider)
     {
         this.serviceScopeFactory = serviceScopeFactory;
         this.logger = logger;
@@ -32,12 +32,23 @@ internal sealed class OutboxPublisherService : BackgroundService
             {
                 await this.PublishBatchAsync(stoppingToken);
             }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                return;
+            }
             catch (Exception exception)
             {
-                this.logger.LogError(exception, "Outbox publisher failed");
+                this.logger.LogError(exception, "Form publisher failed");
             }
 
-            await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
         }
     }
 
@@ -47,9 +58,6 @@ internal sealed class OutboxPublisherService : BackgroundService
 
         var dbContext = scope.ServiceProvider.GetRequiredService<IaculaDbContext>();
         var sendEndpointProvider = scope.ServiceProvider.GetRequiredService<ISendEndpointProvider>();
-
-        var nowUtc = this.timeProvider.GetUtcNow().UtcDateTime;
-        var lockUntilUtc = nowUtc.AddSeconds(30);
 
         // Oracle SELECT FOR UPDATE SKIP LOCKED atomically claims a disjoint set of rows per
         // database session — concurrent app instances each receive unique rows with no contention.
@@ -65,24 +73,21 @@ internal sealed class OutboxPublisherService : BackgroundService
             {
                 selectCmd.Transaction = dbContext.Database.CurrentTransaction!.GetDbTransaction();
                 selectCmd.CommandText = """
-                    SELECT "Id" FROM "Outbox"
-                    WHERE "SentAtUtc" IS NULL
-                      AND "FailedAtUtc" IS NULL
-                      AND ("ProcessAfterUtc" IS NULL OR "ProcessAfterUtc" <= :p_proc)
-                      AND ("LockedUntilUtc" IS NULL OR "LockedUntilUtc" <= :p_lock)
+                    SELECT "Id" FROM "Forms"
+                    WHERE "Status" IN (:p_created, :p_failed)
                       AND ROWNUM <= :p_batch
                     FOR UPDATE SKIP LOCKED
                     """;
 
-                var pProc = selectCmd.CreateParameter();
-                pProc.ParameterName = "p_proc";
-                pProc.Value = nowUtc;
-                selectCmd.Parameters.Add(pProc);
+                var pCreated = selectCmd.CreateParameter();
+                pCreated.ParameterName = "p_created";
+                pCreated.Value = (int)MessageStatus.Created;
+                selectCmd.Parameters.Add(pCreated);
 
-                var pLock = selectCmd.CreateParameter();
-                pLock.ParameterName = "p_lock";
-                pLock.Value = nowUtc;
-                selectCmd.Parameters.Add(pLock);
+                var pFailed = selectCmd.CreateParameter();
+                pFailed.ParameterName = "p_failed";
+                pFailed.Value = (int)MessageStatus.Failed;
+                selectCmd.Parameters.Add(pFailed);
 
                 var pBatch = selectCmd.CreateParameter();
                 pBatch.ParameterName = "p_batch";
@@ -101,52 +106,55 @@ internal sealed class OutboxPublisherService : BackgroundService
                 return;
             }
 
-            await dbContext.Outbox
+            await dbContext.Forms
                 .Where(x => lockedIds.Contains(x.Id))
-                .ExecuteUpdateAsync(s => s.SetProperty(x => x.LockedUntilUtc, lockUntilUtc), cancellationToken);
+                .ExecuteUpdateAsync(s => s.SetProperty(x => x.Status, (int)MessageStatus.InProgress), cancellationToken);
 
             await transaction.CommitAsync(cancellationToken);
         }
 
-        var outboxItems = await dbContext.Outbox
+        var forms = await dbContext.Forms
             .Where(x => lockedIds.Contains(x.Id))
             .ToListAsync(cancellationToken);
 
         var endpoint = await sendEndpointProvider.GetSendEndpoint(new Uri("queue:send-form"));
 
-        foreach (var outboxItem in outboxItems)
+        foreach (var form in forms)
         {
-            await this.PublishSingleAsync(dbContext, endpoint, outboxItem, nowUtc, cancellationToken);
+            await this.PublishSingleAsync(dbContext, endpoint, form, cancellationToken);
         }
     }
 
-    private async Task PublishSingleAsync(IaculaDbContext dbContext, ISendEndpoint endpoint, OutboxDbEntity outboxItem, DateTime nowUtc, CancellationToken cancellationToken)
+    private async Task PublishSingleAsync(IaculaDbContext dbContext, ISendEndpoint endpoint, FormDbEntity form, CancellationToken cancellationToken)
     {
         try
         {
-            var messageType = Type.GetType(outboxItem.MessageType, throwOnError: true)!;
-            var messageObject = JsonSerializer.Deserialize(outboxItem.PayloadJson, messageType)!;
+            var message = new Iacula.Shared.SendForm
+            {
+                Id = form.Id,
+                Payload = form.Payload,
+            };
 
-            await endpoint.Send(messageObject, messageType, cancellationToken);
+            await endpoint.Send(message, cancellationToken);
 
-            outboxItem.SentAtUtc = nowUtc;
-            outboxItem.LockedUntilUtc = null;
-
-            await dbContext.SaveChangesAsync(cancellationToken);
+            form.Status = (int)MessageStatus.Published;
         }
         catch (Exception exception)
         {
-            outboxItem.AttemptCount++;
-            outboxItem.LastError = exception.ToString();
-            outboxItem.LockedUntilUtc = null;
-            outboxItem.ProcessAfterUtc = nowUtc.AddSeconds(Math.Min(60, 2 * outboxItem.AttemptCount));
+            form.AttemptCount++;
 
-            if (outboxItem.AttemptCount >= 10)
+            if (form.AttemptCount >= MAX_ATTEMPTS)
             {
-                outboxItem.FailedAtUtc = nowUtc;
+                this.logger.LogError(exception, "Form {FormId} permanently failed after {Attempts} attempts", form.Id, form.AttemptCount);
+                form.Status = (int)MessageStatus.PermanentlyFailed;
             }
-
-            await dbContext.SaveChangesAsync(cancellationToken);
+            else
+            {
+                this.logger.LogWarning(exception, "Failed to publish form {FormId}, attempt {Attempt}/{Max}", form.Id, form.AttemptCount, MAX_ATTEMPTS);
+                form.Status = (int)MessageStatus.Failed;
+            }
         }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 }

@@ -35,7 +35,7 @@ dotnet add src/Infrastructure package Microsoft.EntityFrameworkCore
 dotnet add src/Infrastructure package Microsoft.EntityFrameworkCore.Design
 dotnet add src/Infrastructure package Microsoft.EntityFrameworkCore.Tools
 dotnet add src/Infrastructure package Microsoft.EntityFrameworkCore.InMemory
-dotnet add src/Infrastructure package Microsoft.EntityFrameworkCore.Sqlite
+dotnet add src/Infrastructure package Oracle.EntityFrameworkCore
 dotnet add src/Infrastructure package MassTransit.RabbitMQ --version 8.5.8
 ```
 

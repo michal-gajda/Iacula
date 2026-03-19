@@ -31,10 +31,7 @@ public sealed class FormsController : ControllerBase
 
         await this.mediator.Send(command, cancellationToken);
 
-        return this.Ok(new SendFormResponse
-        {
-            Id = formId.Value,
-        });
+        return this.Accepted(new SendFormResponse { Id = formId.Value });
     }
 }
 

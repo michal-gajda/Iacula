@@ -6,4 +6,5 @@ public enum MessageStatus
     InProgress = 1,
     Published = 2,
     Failed = 3,
+    PermanentlyFailed = 4,
 }

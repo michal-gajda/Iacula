@@ -7,58 +7,17 @@ using Iacula.Domain.Types;
 using Iacula.Infrastructure;
 using Iacula.Infrastructure.EntityFramework;
 using Iacula.Infrastructure.EntityFramework.Models;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using NSubstitute;
+using Microsoft.EntityFrameworkCore.Storage;
 
 [TestClass]
-public class OutboxPublisherServiceTests : IAsyncDisposable
+public class OutboxPublisherServiceTests : TestBase
 {
-    private ServiceProvider provider = null!;
-    private string testDbPath = null!;
-
-    [TestInitialize]
-    public void Setup()
-    {
-        this.testDbPath = Path.Combine(Path.GetTempPath(), $"iacula_test_{Guid.NewGuid()}.db");
-
-        // Note: Using clean connection string without Mode and Timeout
-        // EF Core will add these from the SqliteDbContextOptions when needed
-        var connectionString = $"Data Source={this.testDbPath}";
-
-        var config = new Dictionary<string, string?>
-        {
-            {"ConnectionStrings:DefaultConnection", connectionString},
-            {"Logging:LogLevel:Default", "Information"},
-        };
-
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(config)
-            .Build();
-
-        var services = new ServiceCollection();
-        services.AddSingleton(configuration);
-        services.AddLogging();
-        services.AddApplication();
-        services.AddInfrastructure(configuration);
-
-        this.provider = services.BuildServiceProvider(validateScopes: true);
-
-        using var scope = this.provider.CreateScope();
-        var dbContext = scope.ServiceProvider.GetRequiredService<IaculaDbContext>();
-        dbContext.Database.EnsureCreated();
-        dbContext.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
-        dbContext.Database.ExecuteSqlRaw("PRAGMA busy_timeout=30000;");
-    }
-
     [TestMethod]
     public async Task MultipleInstances_Should_Not_ProcessSameItemTwice()
     {
         // Arrange: Create 100 outbox items
-        await using var initialScope = this.provider.CreateAsyncScope();
+        await using var initialScope = this.Provider.CreateAsyncScope();
         var dbContext = initialScope.ServiceProvider.GetRequiredService<IaculaDbContext>();
         var now = DateTime.UtcNow;
 
@@ -76,66 +35,27 @@ public class OutboxPublisherServiceTests : IAsyncDisposable
         await dbContext.Outbox.AddRangeAsync(outboxItems);
         await dbContext.SaveChangesAsync();
 
-        // Act: Simulate 5 app instances running PublishBatchAsync concurrently
-        var publishTasks = Enumerable.Range(0, 5)
-            .Select(async instanceId =>
+        // Act: Simulate 5 app instances polling concurrently until the queue is drained.
+        var allProcessedIds = new List<Guid>();
+
+        while (true)
+        {
+            var roundResults = await Task.WhenAll(Enumerable.Range(0, 5)
+                .Select(_ => ProcessBatchAsync(now)));
+
+            var processedThisRound = roundResults.SelectMany(ids => ids).ToList();
+            if (processedThisRound.Count == 0)
             {
-                await using var scope = this.provider.CreateAsyncScope();
-                var ctx = scope.ServiceProvider.GetRequiredService<IaculaDbContext>();
+                break;
+            }
 
-                // Simulate PublishBatchAsync logic
-                var lockUntilUtc = now.AddSeconds(30);
-                var publishedIds = new List<Guid>();
-
-                var candidateIds = await ctx.Outbox
-                    .AsNoTracking()
-                    .Where(item => item.SentAtUtc == null)
-                    .Where(item => item.FailedAtUtc == null)
-                    .Where(item => item.LockedUntilUtc == null || item.LockedUntilUtc <= now)
-                    .OrderBy(item => item.CreatedAtUtc)
-                    .Select(item => item.Id)
-                    .Take(50)
-                    .ToListAsync();
-
-                foreach (var candidateId in candidateIds)
-                {
-                    // Atomic claim: try to lock the item
-                    var rowsAffected = await ctx.Database.ExecuteSqlInterpolatedAsync(
-                        $"""
-                        UPDATE "Outbox"
-                        SET "LockedUntilUtc" = {lockUntilUtc}
-                        WHERE "Id" = {candidateId}
-                          AND "SentAtUtc" IS NULL
-                          AND "FailedAtUtc" IS NULL
-                          AND ("LockedUntilUtc" IS NULL OR "LockedUntilUtc" <= {now});
-                        """);
-
-                    if (rowsAffected == 1)
-                    {
-                        publishedIds.Add(candidateId);
-                    }
-                }
-
-                // Mark as sent
-                foreach (var publishedId in publishedIds)
-                {
-                    var item = await ctx.Outbox.SingleAsync(x => x.Id == publishedId);
-                    item.SentAtUtc = now;
-                    item.LockedUntilUtc = null;
-                    await ctx.SaveChangesAsync();
-                }
-
-                return publishedIds;
-            })
-            .ToList();
-
-        var results = await Task.WhenAll(publishTasks);
+            allProcessedIds.AddRange(processedThisRound);
+        }
 
         // Assert: All items should be published exactly once
-        await using var verifyScope = this.provider.CreateAsyncScope();
+        await using var verifyScope = this.Provider.CreateAsyncScope();
         var verifyDbContext = verifyScope.ServiceProvider.GetRequiredService<IaculaDbContext>();
 
-        var allProcessedIds = results.SelectMany(x => x).ToList();
         var uniqueProcessedIds = allProcessedIds.Distinct().ToList();
 
         allProcessedIds.Count.ShouldBe(100, "All 100 items should be processed");
@@ -157,7 +77,7 @@ public class OutboxPublisherServiceTests : IAsyncDisposable
     public async Task FailedItem_Should_Not_Block_Others()
     {
         // Arrange: Create some items, mark one as failed
-        await using var initialScope = this.provider.CreateAsyncScope();
+        await using var initialScope = this.Provider.CreateAsyncScope();
         var dbContext = initialScope.ServiceProvider.GetRequiredService<IaculaDbContext>();
         var now = DateTime.UtcNow;
 
@@ -187,7 +107,7 @@ public class OutboxPublisherServiceTests : IAsyncDisposable
         await dbContext.SaveChangesAsync();
 
         // Act: Try to process
-        await using var scope = this.provider.CreateAsyncScope();
+        await using var scope = this.Provider.CreateAsyncScope();
         var ctx = scope.ServiceProvider.GetRequiredService<IaculaDbContext>();
 
         var candidateIds = await ctx.Outbox
@@ -203,31 +123,82 @@ public class OutboxPublisherServiceTests : IAsyncDisposable
         candidateIds.Count.ShouldBe(50);
     }
 
-    public async ValueTask DisposeAsync()
-    {
-        await this.provider.DisposeAsync();
-
-        try
-        {
-            if (File.Exists(this.testDbPath))
-                File.Delete(this.testDbPath);
-
-            var walFile = $"{this.testDbPath}-wal";
-            if (File.Exists(walFile))
-                File.Delete(walFile);
-
-            var shmFile = $"{this.testDbPath}-shm";
-            if (File.Exists(shmFile))
-                File.Delete(shmFile);
-        }
-        catch
-        {
-            // Ignore cleanup errors
-        }
-    }
-
     private record TestMessage
     {
         public int Value { get; set; }
+    }
+
+    private async Task<List<Guid>> ProcessBatchAsync(DateTime now)
+    {
+        await using var scope = this.Provider.CreateAsyncScope();
+        var ctx = scope.ServiceProvider.GetRequiredService<IaculaDbContext>();
+
+        var lockUntilUtc = now.AddSeconds(30);
+        var lockedIds = new List<Guid>();
+
+        await using (var transaction = await ctx.Database.BeginTransactionAsync())
+        {
+            var connection = ctx.Database.GetDbConnection();
+
+            await using (var selectCmd = connection.CreateCommand())
+            {
+                selectCmd.Transaction = ctx.Database.CurrentTransaction!.GetDbTransaction();
+                selectCmd.CommandText = """
+                    SELECT "Id" FROM "Outbox"
+                    WHERE "SentAtUtc" IS NULL
+                      AND "FailedAtUtc" IS NULL
+                      AND ("ProcessAfterUtc" IS NULL OR "ProcessAfterUtc" <= :p_proc)
+                      AND ("LockedUntilUtc" IS NULL OR "LockedUntilUtc" <= :p_lock)
+                      AND ROWNUM <= :p_batch
+                    FOR UPDATE SKIP LOCKED
+                    """;
+
+                var pProc = selectCmd.CreateParameter();
+                pProc.ParameterName = "p_proc";
+                pProc.Value = now;
+                selectCmd.Parameters.Add(pProc);
+
+                var pLock = selectCmd.CreateParameter();
+                pLock.ParameterName = "p_lock";
+                pLock.Value = now;
+                selectCmd.Parameters.Add(pLock);
+
+                var pBatch = selectCmd.CreateParameter();
+                pBatch.ParameterName = "p_batch";
+                pBatch.Value = 50;
+                selectCmd.Parameters.Add(pBatch);
+
+                await using var reader = await selectCmd.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    lockedIds.Add(new Guid((byte[])reader.GetValue(0)));
+                }
+            }
+
+            if (lockedIds.Count == 0)
+            {
+                return lockedIds;
+            }
+
+            await ctx.Outbox
+                .Where(x => lockedIds.Contains(x.Id))
+                .ExecuteUpdateAsync(s => s.SetProperty(x => x.LockedUntilUtc, lockUntilUtc));
+
+            await transaction.CommitAsync();
+        }
+
+        var items = await ctx.Outbox
+            .Where(x => lockedIds.Contains(x.Id))
+            .ToListAsync();
+
+        foreach (var item in items)
+        {
+            item.SentAtUtc = now;
+            item.LockedUntilUtc = null;
+        }
+
+        await ctx.SaveChangesAsync();
+
+        return lockedIds;
     }
 }

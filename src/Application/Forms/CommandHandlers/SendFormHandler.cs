@@ -24,6 +24,12 @@ internal sealed class SendFormHandler : IRequestHandler<SendForm>
     {
         var entity = new FormEntity(request.Id, request.Payload);
 
+        var @event = new FormSent
+        {
+            Id = request.Id,
+            Payload = request.Payload,
+        };
+
         this.logger.LogInformation("Saving form with id {Id}", request.Id.Value);
         await this.unitOfWork.ExecuteInTransactionAsync(async ct =>
         {
@@ -31,13 +37,6 @@ internal sealed class SendFormHandler : IRequestHandler<SendForm>
         }, cancellationToken);
         this.logger.LogInformation("Form with id {Id} saved successfully", request.Id.Value);
 
-        var @event = new FormSent
-        {
-            Id = request.Id,
-            Payload = request.Payload,
-        };
-
-        this.logger.LogInformation("Publishing FormSent event for form with id {Id}", request.Id.Value);
-        await mediator.Publish(@event, cancellationToken);
+        await this.mediator.Publish(@event, cancellationToken);
     }
 }

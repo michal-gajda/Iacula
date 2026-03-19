@@ -1,86 +1,46 @@
 namespace Iacula.Infrastructure.EntityFramework;
 
 using Iacula.Domain.Interfaces;
-using Iacula.Infrastructure.EntityFramework.Interfaces;
 using Iacula.Infrastructure.EntityFramework.Services;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using System.Text.RegularExpressions;
 
 internal static class ServiceExtensions
 {
     public static void AddEntityFramework(this IServiceCollection services, IConfiguration configuration)
     {
+        var provider = configuration["Database:Provider"];
         var connectionString = configuration.GetConnectionString("DefaultConnection");
-        connectionString = string.IsNullOrWhiteSpace(connectionString)
-            ? "Data Source=iacula.db"
-            : connectionString;
 
-        connectionString = NormalizeSqliteConnectionString(connectionString);
-
-        var sqliteBuilder = new SqliteConnectionStringBuilder(connectionString);
-        var isInMemoryDatabase = sqliteBuilder.DataSource.Equals(":memory:", StringComparison.OrdinalIgnoreCase)
-            || sqliteBuilder.Mode is SqliteOpenMode.Memory;
-
-        if (!isInMemoryDatabase)
+        if (string.IsNullOrWhiteSpace(provider))
         {
-            sqliteBuilder.DefaultTimeout = 30;
-            connectionString = sqliteBuilder.ConnectionString;
+            throw new InvalidOperationException("Missing configuration value 'Database:Provider'.");
         }
 
-        if (isInMemoryDatabase)
+        if (string.IsNullOrWhiteSpace(connectionString))
         {
-            services.AddSingleton(sp =>
-            {
-                var connection = new SqliteConnection(connectionString);
-                connection.Open();
-
-                return connection;
-            });
-
-            services.AddDbContext<IaculaDbContext>((serviceProvider, options) =>
-            {
-                var connection = serviceProvider.GetRequiredService<SqliteConnection>();
-                options.UseSqlite(connection);
-            });
+            throw new InvalidOperationException("Missing connection string 'ConnectionStrings:DefaultConnection'.");
         }
-        else
+
+        var normalizedProvider = provider.Trim();
+
+        services.AddDbContext<IaculaDbContext>(options =>
         {
-            services.AddDbContext<IaculaDbContext>(options =>
+            if (normalizedProvider.Equals("Oracle", StringComparison.OrdinalIgnoreCase))
             {
-                options.UseSqlite(connectionString);
-            });
-        }
+                options.UseOracle(connectionString);
+                return;
+            }
+
+            throw new InvalidOperationException($"Unsupported database provider '{normalizedProvider}'.");
+        });
 
         services.AddScoped<DatabaseInitializer>();
 
         services.AddScoped<IUnitOfWork, EntityFrameworkUnitOfWork>();
         services.AddScoped<IFormRepository, FormRepository>();
-        services.AddScoped<IOutboxRepository, OutboxRepository>();
 
-        services.AddHostedService<OutboxPublisherService>();
-    }
-
-    private static string NormalizeSqliteConnectionString(string connectionString)
-    {
-        var normalizedConnectionString = Regex.Replace(
-            connectionString,
-            @"(^|;)\s*Timeout\s*=\s*[^;]+",
-            string.Empty,
-            RegexOptions.IgnoreCase);
-
-        normalizedConnectionString = Regex.Replace(
-            normalizedConnectionString,
-            @"(^|;)\s*Mode\s*=\s*Wal\s*(?=;|$)",
-            string.Empty,
-            RegexOptions.IgnoreCase);
-
-        normalizedConnectionString = normalizedConnectionString.Trim(';', ' ');
-
-        return string.IsNullOrWhiteSpace(normalizedConnectionString)
-            ? "Data Source=iacula.db"
-            : normalizedConnectionString;
+        services.AddHostedService<FormPublisherService>();
     }
 }

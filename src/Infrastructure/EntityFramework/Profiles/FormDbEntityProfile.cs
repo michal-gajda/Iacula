@@ -12,11 +12,12 @@ internal sealed class FormDbEntityProfile : Profile
             .ForMember(target => target.Id, options => options.MapFrom(source => source.Id.Value))
             .ForMember(target => target.Payload, options => options.MapFrom(source => source.Payload))
             .ForMember(target => target.Status, options => options.MapFrom(source => (int)source.Status))
+            .ForMember(target => target.AttemptCount, options => options.MapFrom(source => source.AttemptCount))
             .ForMember(target => target.Version, options => options.MapFrom(source => source.Version))
             ;
 
         base.CreateMap<DbEntity, Entity>()
-            .ConstructUsing(source => new Entity(new FormId(source.Id), source.Payload, (MessageStatus)source.Status, source.Version))
+            .ConstructUsing(source => new Entity(new FormId(source.Id), source.Payload, (MessageStatus)source.Status, source.AttemptCount, source.Version))
             ;
     }
 }
