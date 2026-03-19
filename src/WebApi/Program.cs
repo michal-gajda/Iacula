@@ -10,22 +10,23 @@ using OpenTelemetry.Trace;
 
 public static class Program
 {
-    private const string SERVICE_NAME = "iacula";
-    private const string SERVICE_NAMESPACE = "poc";
-    private const string SERVICE_VERSION = "1.0.0";
-
     public static async Task Main(string[] args)
     {
+        var builder = WebApplication.CreateBuilder(args);
+
+        var serviceSection = builder.Configuration.GetSection("OpenTelemetry:Service");
+        var serviceName = serviceSection["Name"] ?? builder.Environment.ApplicationName;
+        var serviceNamespace = serviceSection["Namespace"] ?? "default";
+        var serviceVersion = serviceSection["Version"] ?? "1.0.0";
+
         var resourceBuilder = ResourceBuilder
             .CreateDefault()
-            .AddService(serviceName: SERVICE_NAME, serviceVersion: SERVICE_VERSION)
-            .AddAttributes(new KeyValuePair<string, object>[]
-            {
-                new("service.namespace", SERVICE_NAMESPACE),
+            .AddService(serviceName: serviceName, serviceVersion: serviceVersion)
+            .AddAttributes(
+            [
+                new("service.namespace", serviceNamespace),
                 new("service.instance.id", Environment.MachineName)
-            });
-
-        var builder = WebApplication.CreateBuilder(args);
+            ]);
 
         builder.Services.AddApplication();
         builder.Services.AddInfrastructure(builder.Configuration);

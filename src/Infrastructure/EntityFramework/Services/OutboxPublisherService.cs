@@ -116,11 +116,11 @@ internal sealed class OutboxPublisherService : BackgroundService
 
         foreach (var outboxItem in outboxItems)
         {
-            await this.PublishSingleAsync(dbContext, endpoint, outboxItem, nowUtc, cancellationToken);
+            await PublishSingleAsync(dbContext, endpoint, outboxItem, nowUtc, cancellationToken);
         }
     }
 
-    private async Task PublishSingleAsync(IaculaDbContext dbContext, ISendEndpoint endpoint, OutboxDbEntity outboxItem, DateTime nowUtc, CancellationToken cancellationToken)
+    private static async Task PublishSingleAsync(IaculaDbContext dbContext, ISendEndpoint endpoint, OutboxDbEntity outboxItem, DateTime nowUtc, CancellationToken cancellationToken)
     {
         try
         {
