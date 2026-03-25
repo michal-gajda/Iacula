@@ -12,7 +12,11 @@ public static class Program
 {
     public static async Task Main(string[] args)
     {
-        var builder = WebApplication.CreateBuilder(args);
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            Args = args,
+            ContentRootPath = AppContext.BaseDirectory,
+        });
 
         var serviceSection = builder.Configuration.GetSection("OpenTelemetry:Service");
         var serviceName = serviceSection["Name"] ?? builder.Environment.ApplicationName;
@@ -25,7 +29,7 @@ public static class Program
             .AddAttributes(
             [
                 new("service.namespace", serviceNamespace),
-                new("service.instance.id", Environment.MachineName)
+                new("service.instance.id", Environment.MachineName),
             ]);
 
         builder.Services.AddApplication();
